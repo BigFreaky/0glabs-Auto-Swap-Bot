@@ -46,7 +46,7 @@ const ROUTER_ADDRESS = process.env.ROUTER_ADDRESS;
 const USDT_ADDRESS = process.env.USDT_ADDRESS;
 const ETH_ADDRESS = process.env.ETH_ADDRESS; // Usually WETH or a similar wrapped ETH for DEX swaps
 const BTC_ADDRESS = process.env.BTC_ADDRESS; // Usually WBTC or a similar wrapped BTC
-const NETWORK_NAME = process.env.NETWORK_NAME || "Unknown Network";
+const NETWORK_NAME = process.env.NETWORK_NAME || "Unknown Network"; // Still used for initial log, but removed from balance line
 
 const APPROVAL_GAS_LIMIT = 100000n;
 const SWAP_GAS_LIMIT = 300000n; // Slightly increased for safety margin
@@ -163,7 +163,7 @@ function logSectionTitle(title) {
 
     log("", true); // Extra space above the title
     log(greenColor + formattedTitle + resetAll, true);
-    log("", true); // Extra space below the title - ADDED
+    log("", true); // Extra space below the title 
 }
 
 
@@ -183,25 +183,25 @@ async function getCurrentGasPrice() {
 }
 
 async function getWalletBalances() {
-    log(""); // ADDED: Add a blank line before balance logs for separation
+    log(""); // Add a blank line before balance logs for separation
     try {
         const nativeBalance = await provider.getBalance(wallet.address);
-        log(`💰 Native Balance (${NETWORK_NAME}): ${ethers.formatEther(nativeBalance)}`);
+        log(`💰 Native Balance: ${ethers.formatEther(nativeBalance)}`); 
 
         const usdtContract = new ethers.Contract(USDT_ADDRESS, ERC20_ABI, provider);
         const usdtBalance = await usdtContract.balanceOf(wallet.address);
         const usdtDecimals = await usdtContract.decimals();
-        log(`💰 USDT Balance: ${ethers.formatUnits(usdtBalance, usdtDecimals)}`);
+        log(`💰 USDT Balance ${ethers.formatUnits(usdtBalance, usdtDecimals)}`); 
 
         const ethContract = new ethers.Contract(ETH_ADDRESS, ERC20_ABI, provider);
         const ethBalance = await ethContract.balanceOf(wallet.address);
         const ethDecimals = await ethContract.decimals();
-        log(`💰 ETH (Token) Balance: ${ethers.formatUnits(ethBalance, ethDecimals)}`);
+        log(`💰 ETH Balance ${ethers.formatUnits(ethBalance, ethDecimals)}`); 
         
         const btcContract = new ethers.Contract(BTC_ADDRESS, ERC20_ABI, provider);
         const btcBalance = await btcContract.balanceOf(wallet.address);
         const btcDecimals = await btcContract.decimals();
-        log(`💰 BTC (Token) Balance: ${ethers.formatUnits(btcBalance, btcDecimals)}`);
+        log(`💰 BTC Balance ${ethers.formatUnits(btcBalance, btcDecimals)}`); 
 
     } catch (error) {
         log(`⚠️ Error fetching wallet balances: ${error.message}`);
@@ -257,7 +257,7 @@ async function approveTokenIfNeeded(tokenAddress, amountToApprove) {
             return false; // For other errors, don't retry
         }
     }
-    return false; // Should not be reached if MAX_SWAP_RETRIES > 0
+    return false; 
 }
 
 async function executeSwap(tokenInAddress, tokenOutAddress, amountIn) {
@@ -324,7 +324,7 @@ async function executeSwap(tokenInAddress, tokenOutAddress, amountIn) {
             return false; // For other non-retryable errors
         }
     }
-    return false; // Should not be reached if MAX_SWAP_RETRIES > 0
+    return false; 
 }
 
 // --- Main Execution Logic ---
@@ -338,7 +338,7 @@ async function main() {
     log(`💰 ETH Swap Amount: ${config.ETH_AMOUNT_FOR_SWAP_STR}`);
     log(`💰 BTC Swap Amount: ${config.BTC_AMOUNT_FOR_SWAP_STR}`);
     log(`⏱️ Delay between swaps: ${DELAY_SECONDS_MIN}-${DELAY_SECONDS_MAX} seconds`);
-    log(`💲 DEX Fee Tier: ${FEE_TIER}`);
+    log(`⚙️ DEX Fee Tier: ${FEE_TIER}`); // MODIFIED ICON
     log(`🔁 Max Swap Retries: ${MAX_SWAP_RETRIES}`);
     log(`⏱️ Retry Delay: ${RETRY_DELAY_SECONDS} seconds`);
 
