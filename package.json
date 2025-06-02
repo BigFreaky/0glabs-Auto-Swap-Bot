@@ -1,23 +1,19 @@
 {
-  "name": "0glabs-Auto-Swap-Bot",
+  "name": "0G LABS AUTO SWAP",
   "version": "1.0.0",
   "description": "Automated 0gLabs Swap Bot",
-  "main": "index.js",
   "type": "module",
+  "main": "index.js",
   "scripts": {
-    "start": "node index.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node index.js"
   },
-  "keywords": [
-    "blockchain",
-    "swap",
-    "bot",
-    "ethers"
-  ],
-  "author": "Makera1n",
-  "license": "ISC",
   "dependencies": {
-    "dotenv": "^16.4.5",  acakt version may vary
-    "ethers": "^6.12.1"   acakt version may vary
-  }
+    "axios": "^1.8.4",
+    "blessed": "^0.1.81",
+    "dotenv": "^16.0.0",
+    "ethers": "^6.13.5",
+    "figlet": "^1.8.0"
+  },
+  "author": "Makera1n",
+  "license": "ISC"
 }
