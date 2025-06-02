@@ -8,11 +8,16 @@
     "start": "node index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": ["blockchain", "swap", "bot", "ethers"],
+  "keywords": [
+    "blockchain",
+    "swap",
+    "bot",
+    "ethers"
+  ],
   "author": "Makera1n",
   "license": "ISC",
   "dependencies": {
-    "dotenv": "^16.3.1",
-    "ethers": "^6.7.1"
+    "dotenv": "^16.4.5",  acakt version may vary
+    "ethers": "^6.12.1"   acakt version may vary
   }
 }
