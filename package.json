@@ -1,0 +1,18 @@
+{
+  "name": "0glabs-Auto-Swap-Bot",
+  "version": "1.0.0",
+  "description": "Automated 0gLabs Swap Bot",
+  "main": "index.js",
+  "type": "module", // Important for using import/export syntax
+  "scripts": {
+    "start": "node index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": ["blockchain", "swap", "bot", "ethers"],
+  "author": "Makera1n",
+  "license": "ISC",
+  "dependencies": {
+    "dotenv": "^16.3.1", // Example version, will be actual installed version
+    "ethers": "^6.7.1"   // Example version, will be actual installed version
+  }
+}
