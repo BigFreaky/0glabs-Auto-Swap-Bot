@@ -17,7 +17,9 @@ let config = {
     NUM_SWAPS_PER_PAIR: 10,
     DELAY_SECONDS_MIN: 15,
     DELAY_SECONDS_MAX: 45,
-    FEE_TIER: 3000 // Default fee tier (e.g., 0.3% for Uniswap V3)
+    FEE_TIER: 3000, // Default fee tier (e.g., 0.3% for Uniswap V3)
+    MAX_SWAP_RETRIES: 3, // Maximum number of retries for a failed swap
+    RETRY_DELAY_SECONDS: 60 // Delay before retrying a swap
 };
 
 try {
@@ -47,16 +49,18 @@ const BTC_ADDRESS = process.env.BTC_ADDRESS; // Usually WBTC or a similar wrappe
 const NETWORK_NAME = process.env.NETWORK_NAME || "Unknown Network";
 
 const APPROVAL_GAS_LIMIT = 100000n;
-const SWAP_GAS_LIMIT = 250000n;
+const SWAP_GAS_LIMIT = 300000n; // Slightly increased for safety margin
 
 // Parse amounts from config using their respective decimals
 const USDT_AMOUNT_FOR_SWAP = ethers.parseUnits(config.USDT_AMOUNT_FOR_SWAP_STR, config.USDT_DECIMALS);
-const ETH_AMOUNT_FOR_SWAP = ethers.parseUnits(config.ETH_AMOUNT_FOR_SWAP_STR, config.ETH_DECIMALS);
+const ETH_AMOUNT_FOR_SWAP = ethers.parseUnits(config.ETH_AMOUNT_FOR_SWAP_STR, config.ETH_DECIMALS); // This is parsed but not used in current swap pairs
 const BTC_AMOUNT_FOR_SWAP = ethers.parseUnits(config.BTC_AMOUNT_FOR_SWAP_STR, config.BTC_DECIMALS);
 const NUM_SWAPS_PER_PAIR = config.NUM_SWAPS_PER_PAIR;
 const DELAY_SECONDS_MIN = config.DELAY_SECONDS_MIN;
 const DELAY_SECONDS_MAX = config.DELAY_SECONDS_MAX;
 const FEE_TIER = config.FEE_TIER;
+const MAX_SWAP_RETRIES = config.MAX_SWAP_RETRIES;
+const RETRY_DELAY_SECONDS = config.RETRY_DELAY_SECONDS;
 
 
 // --- Basic Sanity Checks ---
@@ -159,7 +163,7 @@ function logSectionTitle(title) {
 
     log("", true); // Extra space above the title
     log(greenColor + formattedTitle + resetAll, true);
-    // log("", true); // Space below the title (optional, can be removed if too much)
+    log("", true); // Extra space below the title - ADDED
 }
 
 
@@ -179,6 +183,7 @@ async function getCurrentGasPrice() {
 }
 
 async function getWalletBalances() {
+    log(""); // ADDED: Add a blank line before balance logs for separation
     try {
         const nativeBalance = await provider.getBalance(wallet.address);
         log(`💰 Native Balance (${NETWORK_NAME}): ${ethers.formatEther(nativeBalance)}`);
@@ -205,37 +210,54 @@ async function getWalletBalances() {
 
 async function approveTokenIfNeeded(tokenAddress, amountToApprove) {
     const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, wallet);
-    try {
-        const tokenDecimals = await tokenContract.decimals();
-        const currentAllowance = await tokenContract.allowance(wallet.address, ROUTER_ADDRESS);
-        if (currentAllowance >= amountToApprove) {
-            log(`✅ Approval for token ${tokenAddress} not needed. Current allowance: ${ethers.formatUnits(currentAllowance, tokenDecimals)}`);
-            return true;
-        }
+    let retries = 0;
+    while(retries < MAX_SWAP_RETRIES) {
+        try {
+            const tokenDecimals = await tokenContract.decimals();
+            const currentAllowance = await tokenContract.allowance(wallet.address, ROUTER_ADDRESS);
+            if (currentAllowance >= amountToApprove) {
+                log(`✅ Approval for token ${tokenAddress} not needed. Current allowance: ${ethers.formatUnits(currentAllowance, tokenDecimals)}`);
+                return true;
+            }
 
-        log(`⏳ Approving ${ethers.formatUnits(amountToApprove, tokenDecimals)} of token ${tokenAddress} for router ${ROUTER_ADDRESS}...`);
-        const gasPrice = await getCurrentGasPrice();
-        const tx = await tokenContract.approve(ROUTER_ADDRESS, amountToApprove, {
-            gasLimit: APPROVAL_GAS_LIMIT,
-            gasPrice: gasPrice,
-            nonce: nextNonce
-        });
-        log(`🕒 Approval transaction sent: ${shortHash(tx.hash)}. Waiting for confirmation...`);
-        await tx.wait();
-        log(`✅ Approval successful for token ${tokenAddress}. Tx: ${shortHash(tx.hash)}`);
-        nextNonce++;
-        return true;
-    } catch (error) {
-        log(`🔴 Error approving token ${tokenAddress}: ${error.message}`);
-        if (error.transactionHash) {
-            log(`🔴 Approval Tx Hash: ${error.transactionHash}`);
+            log(`⏳ Approving ${ethers.formatUnits(amountToApprove, tokenDecimals)} of token ${tokenAddress} for router ${ROUTER_ADDRESS}... (Attempt ${retries + 1})`);
+            const gasPrice = await getCurrentGasPrice();
+            const tx = await tokenContract.approve(ROUTER_ADDRESS, amountToApprove, {
+                gasLimit: APPROVAL_GAS_LIMIT,
+                gasPrice: gasPrice,
+                nonce: nextNonce
+            });
+            log(`🕒 Approval transaction sent: ${shortHash(tx.hash)}. Waiting for confirmation...`);
+            await tx.wait(1); // Wait for 1 confirmation
+            log(`✅ Approval successful for token ${tokenAddress}. Tx: ${shortHash(tx.hash)}`);
+            nextNonce++;
+            return true;
+        } catch (error) {
+            log(`🔴 Error approving token ${tokenAddress} (Attempt ${retries + 1}): ${error.message}`);
+            if (error.transactionHash) {
+                log(`🔴 Approval Tx Hash: ${error.transactionHash}`);
+            }
+            if (error.code === 'SERVER_ERROR' || error.message.includes('Gateway Time-out') || error.message.includes('timeout')) {
+                retries++;
+                if (retries < MAX_SWAP_RETRIES) {
+                    log(`🔁 Retrying approval in ${RETRY_DELAY_SECONDS} seconds...`);
+                    await delay(RETRY_DELAY_SECONDS * 1000);
+                    await initializeNonce(); // Refresh nonce before retry
+                    continue;
+                } else {
+                    log(`🔴 Max retries reached for approval. Giving up.`);
+                    return false;
+                }
+            } else if (error.message.toLowerCase().includes("nonce")) {
+                 log(`ℹ️ Nonce error detected during approval. Attempting to refresh nonce and retry immediately.`);
+                 await initializeNonce(); 
+                 // No increment to retries here, as it's a different kind of recoverable error
+                 continue; 
+            }
+            return false; // For other errors, don't retry
         }
-        if (error.message.toLowerCase().includes("nonce")) {
-             log(`ℹ️ Nonce error detected during approval. Attempting to refresh nonce.`);
-             await initializeNonce(); 
-        }
-        return false;
     }
+    return false; // Should not be reached if MAX_SWAP_RETRIES > 0
 }
 
 async function executeSwap(tokenInAddress, tokenOutAddress, amountIn) {
@@ -243,47 +265,66 @@ async function executeSwap(tokenInAddress, tokenOutAddress, amountIn) {
         log(`🔴 Swapping native asset directly is not supported by this exactInputSingle ERC20->ERC20 script. Use WETH or equivalent.`);
         return false;
     }
+    
+    let retries = 0;
+    while(retries < MAX_SWAP_RETRIES) {
+        try {
+            const swapContract = new ethers.Contract(ROUTER_ADDRESS, SWAP_ROUTER_ABI, wallet);
+            const tokenInContract = new ethers.Contract(tokenInAddress, ERC20_ABI, provider);
+            const tokenInDecimals = await tokenInContract.decimals();
 
-    const swapContract = new ethers.Contract(ROUTER_ADDRESS, SWAP_ROUTER_ABI, wallet);
-    const tokenInContract = new ethers.Contract(tokenInAddress, ERC20_ABI, provider);
-    const tokenInDecimals = await tokenInContract.decimals();
+            log(`🔄 Attempting to swap ${ethers.formatUnits(amountIn, tokenInDecimals)} of ${tokenInAddress} for ${tokenOutAddress} using fee tier ${FEE_TIER} (Attempt ${retries + 1})`);
 
-    log(`🔄 Attempting to swap ${ethers.formatUnits(amountIn, tokenInDecimals)} of ${tokenInAddress} for ${tokenOutAddress} using fee tier ${FEE_TIER}`);
+            const params = {
+                tokenIn: tokenInAddress,
+                tokenOut: tokenOutAddress,
+                fee: FEE_TIER, 
+                recipient: wallet.address,
+                deadline: Math.floor(Date.now() / 1000) + (60 * 10), 
+                amountIn: amountIn,
+                amountOutMinimum: 0, 
+                sqrtPriceLimitX96: 0n,
+            };
 
-    try {
-        const params = {
-            tokenIn: tokenInAddress,
-            tokenOut: tokenOutAddress,
-            fee: FEE_TIER, 
-            recipient: wallet.address,
-            deadline: Math.floor(Date.now() / 1000) + (60 * 10), 
-            amountIn: amountIn,
-            amountOutMinimum: 0, 
-            sqrtPriceLimitX96: 0n,
-        };
+            const gasPrice = await getCurrentGasPrice();
+            const tx = await swapContract.exactInputSingle(params, {
+                gasLimit: SWAP_GAS_LIMIT,
+                gasPrice: gasPrice,
+                nonce: nextNonce
+            });
+            log(`🕒 Swap transaction sent: ${shortHash(tx.hash)}. Waiting for confirmation...`);
+            const receipt = await tx.wait(1); // Wait for 1 confirmation
+            log(`✅ Swap successful! Tx: ${shortHash(receipt.hash)}. Gas used: ${receipt.gasUsed.toString()}`);
+            nextNonce++;
+            return true;
+        } catch (error) {
+            log(`🔴 Error executing swap from ${tokenInAddress} to ${tokenOutAddress} (Attempt ${retries + 1}): ${error.message}`);
+            if (error.transactionHash) {
+                log(`🔴 Swap Tx Hash: ${error.transactionHash}`);
+            }
 
-        const gasPrice = await getCurrentGasPrice();
-        const tx = await swapContract.exactInputSingle(params, {
-            gasLimit: SWAP_GAS_LIMIT,
-            gasPrice: gasPrice,
-            nonce: nextNonce
-        });
-        log(`🕒 Swap transaction sent: ${shortHash(tx.hash)}. Waiting for confirmation...`);
-        const receipt = await tx.wait();
-        log(`✅ Swap successful! Tx: ${shortHash(receipt.hash)}. Gas used: ${receipt.gasUsed.toString()}`);
-        nextNonce++;
-        return true;
-    } catch (error) {
-        log(`🔴 Error executing swap from ${tokenInAddress} to ${tokenOutAddress}: ${error.message}`);
-         if (error.transactionHash) {
-            log(`🔴 Swap Tx Hash: ${error.transactionHash}`);
+            // Check for server errors or timeout errors to retry
+            if (error.code === 'SERVER_ERROR' || error.message.includes('Gateway Time-out') || error.message.includes('timeout')) {
+                retries++;
+                if (retries < MAX_SWAP_RETRIES) {
+                    log(`🔁 Retrying swap in ${RETRY_DELAY_SECONDS} seconds due to server/timeout error...`);
+                    await delay(RETRY_DELAY_SECONDS * 1000);
+                    await initializeNonce(); // Crucial: Refresh nonce before retrying
+                    continue; // Continue to the next iteration of the while loop
+                } else {
+                    log(`🔴 Max retries reached for swap. Giving up on this swap.`);
+                    return false; // Failed after max retries
+                }
+            } else if (error.message.toLowerCase().includes("nonce")) {
+                log(`ℹ️ Nonce error detected during swap. Attempting to refresh nonce and retry immediately.`);
+                await initializeNonce(); 
+                // No increment to retries here, as it's a different kind of recoverable error
+                continue; 
+            }
+            return false; // For other non-retryable errors
         }
-        if (error.message.toLowerCase().includes("nonce")) {
-             log(`ℹ️ Nonce error detected during swap. Attempting to refresh nonce.`);
-             await initializeNonce(); 
-        }
-        return false;
     }
+    return false; // Should not be reached if MAX_SWAP_RETRIES > 0
 }
 
 // --- Main Execution Logic ---
@@ -293,11 +334,13 @@ async function main() {
     log(`Network: ${NETWORK_NAME}`);
     log(`Wallet Address: ${wallet.address}`);
     log(`🔁 Number of swaps per pair: ${NUM_SWAPS_PER_PAIR}`);
-    log(`💰 USDT swap amount: ${config.USDT_AMOUNT_FOR_SWAP_STR} (Decimals: ${config.USDT_DECIMALS})`);
-    log(`💰 ETH swap amount (when swapping from ETH): ${config.ETH_AMOUNT_FOR_SWAP_STR} (Decimals: ${config.ETH_DECIMALS})`);
-    log(`💰 BTC swap amount (when swapping from BTC): ${config.BTC_AMOUNT_FOR_SWAP_STR} (Decimals: ${config.BTC_DECIMALS})`);
+    log(`💰 USDT Swap Amount: ${config.USDT_AMOUNT_FOR_SWAP_STR}`);
+    log(`💰 ETH Swap Amount: ${config.ETH_AMOUNT_FOR_SWAP_STR}`);
+    log(`💰 BTC Swap Amount: ${config.BTC_AMOUNT_FOR_SWAP_STR}`);
     log(`⏱️ Delay between swaps: ${DELAY_SECONDS_MIN}-${DELAY_SECONDS_MAX} seconds`);
     log(`💲 DEX Fee Tier: ${FEE_TIER}`);
+    log(`🔁 Max Swap Retries: ${MAX_SWAP_RETRIES}`);
+    log(`⏱️ Retry Delay: ${RETRY_DELAY_SECONDS} seconds`);
 
 
     await initializeNonce(); 
@@ -310,7 +353,12 @@ async function main() {
         const approved = await approveTokenIfNeeded(USDT_ADDRESS, USDT_AMOUNT_FOR_SWAP);
         if (approved) {
             const swapped = await executeSwap(USDT_ADDRESS, ETH_ADDRESS, USDT_AMOUNT_FOR_SWAP);
-            if(swapped) await getWalletBalances();
+            if(swapped) {
+                log("✅ Current swap operation successful.");
+                await getWalletBalances();
+            } else {
+                 log("🔴 Current swap operation failed after retries or due to a non-retryable error.");
+            }
         } else {
             log(`Skipping swap due to approval failure for USDT.`);
         }
@@ -328,7 +376,12 @@ async function main() {
         const approved = await approveTokenIfNeeded(USDT_ADDRESS, USDT_AMOUNT_FOR_SWAP);
         if (approved) {
             const swapped = await executeSwap(USDT_ADDRESS, BTC_ADDRESS, USDT_AMOUNT_FOR_SWAP);
-            if(swapped) await getWalletBalances();
+             if(swapped) {
+                log("✅ Current swap operation successful.");
+                await getWalletBalances();
+            } else {
+                 log("🔴 Current swap operation failed after retries or due to a non-retryable error.");
+            }
         } else {
             log(`Skipping swap due to approval failure for USDT.`);
         }
@@ -346,7 +399,12 @@ async function main() {
         const approved = await approveTokenIfNeeded(BTC_ADDRESS, BTC_AMOUNT_FOR_SWAP);
         if (approved) {
             const swapped = await executeSwap(BTC_ADDRESS, ETH_ADDRESS, BTC_AMOUNT_FOR_SWAP);
-            if(swapped) await getWalletBalances();
+            if(swapped) {
+                log("✅ Current swap operation successful.");
+                await getWalletBalances();
+            } else {
+                 log("🔴 Current swap operation failed after retries or due to a non-retryable error.");
+            }
         } else {
             log(`Skipping swap due to approval failure for BTC.`);
         }
