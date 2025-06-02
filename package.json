@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Automated 0gLabs Swap Bot",
   "main": "index.js",
-  "type": "module", // Important for using import/export syntax
+  "type": "module",
   "scripts": {
     "start": "node index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
@@ -12,7 +12,7 @@
   "author": "Makera1n",
   "license": "ISC",
   "dependencies": {
-    "dotenv": "^16.3.1", // Example version, will be actual installed version
-    "ethers": "^6.7.1"   // Example version, will be actual installed version
+    "dotenv": "^16.3.1",
+    "ethers": "^6.7.1"
   }
 }
